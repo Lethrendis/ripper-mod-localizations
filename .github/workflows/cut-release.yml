@@ -1,0 +1,102 @@
+name: Cut Release
+
+# Merges the open translation pull requests, then tags and publishes a release
+# with GitHub's generated release notes. The Build Release workflow runs
+# afterwards and attaches module.json and module.zip.
+#
+# Runs every Monday, and can also be started by hand from Actions, "Cut Release",
+# "Run workflow". A scheduled run works out its own version number, and skips the
+# release entirely when no pull request was merged, so there is nothing to do.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example 1.1. Leave empty to bump the last one
+        required: false
+        type: string
+      merge_method:
+        description: How the pull requests are merged
+        required: true
+        default: squash
+        type: choice
+        options:
+          - squash
+          - merge
+          - rebase
+      dry_run:
+        description: Only report what would be merged, change nothing
+        required: true
+        default: true
+        type: boolean
+  schedule:
+    # Mondays at 06:00 UTC
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: cut-release
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    name: Merge translation pull requests
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      merged: ${{ steps.merge.outputs.merged }}
+    steps:
+    - uses: actions/checkout@v4
+
+    # Scheduled runs have no inputs, so the version is derived from the latest
+    # release tag (1.0 becomes 1.1) or from today's date when that is not usable.
+    - name: Work out the version to release
+      id: version
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        REQUESTED_TAG: ${{ inputs.tag }}
+      run: |
+        if [ -n "$REQUESTED_TAG" ]; then
+          tag="$REQUESTED_TAG"
+        else
+          tag="$(node .github/scripts/next-tag.mjs)"
+        fi
+        echo "Releasing $tag"
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+    # Only pull requests whose diff is confined to translations/ and passes the
+    # JSON checks are merged; everything else is reported and left for a human.
+    - name: Merge the open translation pull requests
+      id: merge
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        node .github/scripts/merge-translations.mjs \
+          --merge-method "${{ inputs.merge_method || 'squash' }}" \
+          ${{ inputs.dry_run && '--dry-run' || '' }}
+
+    - name: Create the release with generated notes
+      if: ${{ !inputs.dry_run && steps.merge.outputs.merged != '0' }}
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release create "${{ steps.version.outputs.tag }}" \
+          --target "${{ github.event.repository.default_branch }}" \
+          --title "${{ steps.version.outputs.tag }}" \
+          --generate-notes
+
+    - name: Nothing to release
+      if: ${{ !inputs.dry_run && steps.merge.outputs.merged == '0' }}
+      run: echo "No pull request was merged, so no release was created."
+
+  build:
+    name: Build and attach the release files
+    needs: merge
+    if: ${{ !inputs.dry_run && needs.merge.outputs.merged != '0' }}
+    uses: ./.github/workflows/main.yml
+    with:
+      tag: ${{ needs.merge.outputs.tag }}
