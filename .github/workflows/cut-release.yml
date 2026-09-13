@@ -50,7 +50,7 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       merged: ${{ steps.merge.outputs.merged }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     # Scheduled runs have no inputs, so the version is derived from the latest
     # release tag (1.0 becomes 1.1) or from today's date when that is not usable.
