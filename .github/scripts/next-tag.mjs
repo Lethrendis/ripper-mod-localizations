@@ -7,8 +7,8 @@
  * not numeric, it falls back to today's date as YYYY.MM.DD, which is also a
  * valid module version.
  *
- * Used by .github/workflows/cut-release.yml for scheduled releases, where there
- * is nobody around to type a version.
+ * Used by .github/workflows/cut-release.yml, where there is nobody around to
+ * type a version.
  */
 
 import { execFileSync } from 'node:child_process';
